@@ -5,6 +5,7 @@ import android.content.Context;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.support.v7.app.ActionBarActivity;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -16,6 +17,12 @@ import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.ListView;
+import android.widget.Toast;
+
+import com.firebase.client.DataSnapshot;
+import com.firebase.client.Firebase;
+import com.firebase.client.FirebaseError;
+import com.firebase.client.ValueEventListener;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -44,6 +51,8 @@ public class MainActivity extends ActionBarActivity implements NotificationCente
     private int keyboardHeight;
     private boolean keyboardVisible;
     private WindowManager.LayoutParams windowLayoutParams;
+    private String android_id = "ANDROID_ID_UNRESOLVED";
+    Firebase roomSteveFriends;
 
 
     private EditText.OnKeyListener keyListener = new View.OnKeyListener() {
@@ -116,6 +125,14 @@ public class MainActivity extends ActionBarActivity implements NotificationCente
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        Firebase.setAndroidContext(this);
+        roomSteveFriends = new Firebase("https://chatsteve.firebaseio.com/rooms/stevefriends/chats");
+
+        android_id = Settings.Secure.getString(this.getContentResolver(),
+                Settings.Secure.ANDROID_ID);
+
+
+
         AndroidUtilities.statusBarHeight = getStatusBarHeight();
 
         getWindow().setBackgroundDrawable(getResources().getDrawable(R.drawable.background));
@@ -160,36 +177,83 @@ public class MainActivity extends ActionBarActivity implements NotificationCente
         //sizeNotifierRelativeLayout.delegate = this;
 
         NotificationCenter.getInstance().addObserver(this, NotificationCenter.emojiDidLoaded);
+
+
+        // Attach an listener to read the data at our posts reference
+        roomSteveFriends.limitToLast(10).addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                Log.d(Constants.TAG,"There are " + snapshot.getChildrenCount() + " messages");
+                chatMessages.clear();
+                for (DataSnapshot postSnapshot: snapshot.getChildren()) {
+                    ChatMessage message = postSnapshot.getValue(ChatMessage.class);
+                    Log.d(Constants.TAG, message.getMessageText() + " - " + message.getAndroidID());
+                    //SI LO ESTÁ LEYENDO DEL SERVER, ESO QUIERO DECIR, QUE YA ESTÁ EN EL SERVER, SIEMPRE.
+                    message.setMessageStatus(Constants.DELIVERED);
+                    chatMessages.add(message);
+                }
+
+                if(listAdapter!=null)
+                    listAdapter.notifyDataSetChanged();
+
+            }
+            @Override
+            public void onCancelled(FirebaseError firebaseError) {
+                Log.d(Constants.TAG,"The read failed: " + firebaseError.getMessage());
+                Toast.makeText(getActivity(), "THE READ FAILED : " + firebaseError.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+
     }
 
     private void sendMessage(final String messageText, final UserType userType)
     {
+
         if(messageText.trim().length()==0)
             return;
 
         final ChatMessage message = new ChatMessage();
-        message.setMessageStatus(Status.SENT);
+        message.setMessageStatus(Constants.SENT);
         message.setMessageText(messageText);
-        message.setUserType(userType);
+        message.setAndroidID(android_id);
         message.setMessageTime(new Date().getTime());
         chatMessages.add(message);
 
-        if(listAdapter!=null)
+        if(listAdapter!=null){
             listAdapter.notifyDataSetChanged();
+        }
 
+        //message.setMessageStatus(Constants.DELIVERED);
+
+        roomSteveFriends.push().setValue(message, new Firebase.CompletionListener() {
+            @Override
+            public void onComplete(FirebaseError firebaseError, Firebase firebase) {
+                if (firebaseError != null) {
+                    Log.d(Constants.TAG, "FirebaseError : " + firebaseError);
+                    Toast.makeText(getActivity(), "No se guardó correctamente", Toast.LENGTH_SHORT).show();
+                } else {
+                    message.setMessageStatus(Constants.DELIVERED);
+                    Log.d(Constants.TAG,"Data saved successfully.");
+                    listAdapter.notifyDataSetChanged();
+                }
+            }
+
+        });
         // Mark message as delivered after one second
 
+
+        /*
         final ScheduledExecutorService exec = Executors.newScheduledThreadPool(1);
 
         exec.schedule(new Runnable() {
             @Override
             public void run() {
-                message.setMessageStatus(Status.DELIVERED);
+                message.setMessageStatus(Constants.DELIVERED);
 
                 final ChatMessage message = new ChatMessage();
-                message.setMessageStatus(Status.SENT);
+                message.setMessageStatus(Constants.SENT);
                 message.setMessageText(messageText); // 10 spaces;
-                message.setUserType(UserType.SELF);
+                message.setAndroidID(android_id);
                 message.setMessageTime(new Date().getTime());
                 chatMessages.add(message);
 
@@ -201,7 +265,7 @@ public class MainActivity extends ActionBarActivity implements NotificationCente
 
 
             }
-        }, 1, TimeUnit.SECONDS);
+        }, 1, TimeUnit.SECONDS);*/
 
     }
 
